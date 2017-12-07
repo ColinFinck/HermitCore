@@ -37,91 +37,27 @@ use alloc::heap::{Alloc, AllocErr, Layout};
 use arch::mm::paging::{BasePageSize, PageSize};
 use mm;
 
-
-/// Size of the preallocated space for the Bootstrap Allocator.
-const BOOTSTRAP_HEAP_SIZE: usize = 4096;
-
-/// Alignment of pointers returned by the Bootstrap Allocator.
-/// Note that you also have to align the HermitAllocatorInfo structure!
-const BOOTSTRAP_HEAP_ALIGNMENT: usize = 8;
-
-
-/// The HermitAllocator structure is immutable, so we need this helper structure
-/// for our allocator information.
-#[repr(align(8))]
-pub struct HermitAllocatorInfo {
-	heap: [u8; BOOTSTRAP_HEAP_SIZE],
-	index: usize,
-	is_bootstrapping: bool,
-}
-
-impl HermitAllocatorInfo {
-	const fn new() -> Self {
-		Self {
-			heap: [0xCC; BOOTSTRAP_HEAP_SIZE],
-			index: 0,
-			is_bootstrapping: true,
-		}
-	}
-
-	pub fn switch_to_system_allocator(&mut self) {
-		debug!("Switching to the System Allocator");
-		self.is_bootstrapping = false;
-	}
-}
-
-pub static mut ALLOCATOR_INFO: HermitAllocatorInfo = HermitAllocatorInfo::new();
+static mut IS_INITIALIZED: bool = false;
 
 pub struct HermitAllocator;
 
 unsafe impl<'a> Alloc for &'a HermitAllocator {
 	unsafe fn alloc(&mut self, layout: Layout) -> Result<*mut u8, AllocErr> {
-		if ALLOCATOR_INFO.is_bootstrapping {
-			alloc_bootstrap(layout)
-		} else {
-			alloc_system(layout)
-		}
+		unsafe { assert!(IS_INITIALIZED, "Attempt to allocate before HermitAllocator is initialized! You must not use Boxed types before MM initialization."); }
+		debug!("Allocating {} bytes", layout.size());
+
+		Ok(mm::allocate(layout.size()) as *mut u8)
 	}
 
 	unsafe fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
-		let address = ptr as usize;
+		unsafe { assert!(IS_INITIALIZED, "Attempt to allocate before HermitAllocator is initialized! You must not use Boxed types before MM initialization."); }
+		let virtual_address = ptr as usize;
+		debug!("Deallocating {} bytes at {:#X}", layout.size(), virtual_address);
 
-		// We never deallocate memory of the Bootstrap Allocator.
-		// It would only increase the management burden and we wouldn't save
-		// any significant amounts of memory.
-		// So check if this is a pointer allocated by the System Allocator.
-		if address >= mm::kernel_end_address() {
-			dealloc_system(address, layout);
-		}
+		mm::deallocate(virtual_address, layout.size());
 	}
 }
 
-/// An allocation using the always available Bootstrap Allocator.
-unsafe fn alloc_bootstrap(layout: Layout) -> Result<*mut u8, AllocErr> {
-	let ptr = &mut ALLOCATOR_INFO.heap[ALLOCATOR_INFO.index] as *mut u8;
-	debug!("Allocating {} bytes at {:#X} using the Bootstrap Allocator", layout.size(), ptr as usize);
-
-	// Bump the heap index and align it up to the next BOOTSTRAP_HEAP_ALIGNMENT boundary.
-	ALLOCATOR_INFO.index = align_up!(ALLOCATOR_INFO.index + layout.size(), BOOTSTRAP_HEAP_ALIGNMENT);
-	if ALLOCATOR_INFO.index >= BOOTSTRAP_HEAP_SIZE {
-		panic!("Bootstrap Allocator Overflow! Increase BOOTSTRAP_HEAP_SIZE.");
-	}
-
-	Ok(ptr)
-}
-
-/// An allocation using the initialized System Allocator.
-fn alloc_system(layout: Layout) -> Result<*mut u8, AllocErr> {
-	debug!("Allocating {} bytes using the System Allocator", layout.size());
-
-	let size = align_up!(layout.size(), BasePageSize::SIZE);
-	Ok(mm::allocate(size) as *mut u8)
-}
-
-/// A deallocation using the initialized System Allocator.
-fn dealloc_system(virtual_address: usize, layout: Layout) {
-	debug!("Deallocating {} bytes at {:#X} using the System Allocator", layout.size(), virtual_address);
-
-	let size = align_up!(layout.size(), BasePageSize::SIZE);
-	mm::deallocate(virtual_address, size);
+pub fn init() {
+	unsafe { IS_INITIALIZED = true; }
 }
