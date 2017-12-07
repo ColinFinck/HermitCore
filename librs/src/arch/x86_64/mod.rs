@@ -32,6 +32,7 @@ pub mod pic;
 pub mod pit;
 pub mod processor;
 
+use alloc::vec::Vec;
 use synch::spinlock::*;
 
 
@@ -43,6 +44,8 @@ lazy_static! {
 	static ref CPU_ONLINE: Spinlock<&'static mut u32> =
 		Spinlock::new(unsafe { &mut cpu_online });
 }
+
+static TEST_ARRAY: [usize; 10] = [150, 30, 77, 33, 55, 4, 8, 79, 231, 476];
 
 
 // FUNCTIONS
@@ -88,4 +91,25 @@ pub fn application_processor_init() {
 	irq::enable();
 
 	**CPU_ONLINE.lock() += 1;
+
+	for i in 0..10 {
+		let mut vec1 = Vec::<u8>::new();
+		let mut vec2 = Vec::<u8>::new();
+		let mut vec3 = Vec::<u8>::new();
+
+		drop(vec2);
+
+		for j in 1..TEST_ARRAY[i] {
+			vec1.push(11);
+		}
+
+		for j in 1..TEST_ARRAY[i] {
+			vec3.push(55);
+		}
+
+		info!("Completed test with {} elements", TEST_ARRAY[i]);
+	}
+
+	mm::physicalmem::print_information();
+	mm::virtualmem::print_information();
 }
