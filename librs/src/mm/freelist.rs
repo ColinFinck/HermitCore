@@ -133,7 +133,11 @@ impl FreeList {
 		}
 
 		let tail = self.list.tail;
-		self.list.insert_after(new_node, tail);
+		if tail.is_null() {
+			self.list.push(new_node);
+		} else {
+			self.list.insert_after(new_node, tail);
+		}
 	}
 
 	pub fn print_information(&self, header: &str) {
